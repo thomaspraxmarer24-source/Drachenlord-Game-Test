@@ -327,7 +327,7 @@
         <div class="panel">
           <p class="eyebrow">Handy-Plattformer</p>
           <h1>Drachenlord<br>Simulator</h1>
-          <p>Sammle möglichst viele Münzen und besiege die Hater durch einen Sprung von oben.</p>
+          <p>Sammle möglichst viele Münzen und besiege die Hater. Seltene tannengrüne Münzen geben dir ein Leben zurück.</p>
           <div class="instructions">
             <div><span>◀ ▶</span><br>Bewegen</div>
             <div><span>SPRUNG</span><br>Hater zerquetschen</div>
@@ -614,17 +614,27 @@
     }
 
     function addPlatform(x, level, width) {
-      world.platforms.push({
+      const platform = {
         x: x,
         y: world.groundY - level,
         w: width,
         h: 22,
         level: level
-      });
+      };
+      world.platforms.push(platform);
+      return platform;
     }
 
-    function addCoin(x, y) {
-      world.coins.push({ x: x, y: y, r: 12, taken: false, phase: random() * Math.PI * 2 });
+    function addCoin(x, y, kind) {
+      const coinKind = kind || "gold";
+      world.coins.push({
+        x: x,
+        y: y,
+        r: coinKind === "life" ? 18 : 12,
+        kind: coinKind,
+        taken: false,
+        phase: random() * Math.PI * 2
+      });
     }
 
     function addEnemy(x, y, minX, maxX, speed) {
@@ -663,11 +673,13 @@
         addCoin(start + 458, world.groundY - 232);
       } else {
         const platformCount = random() > .42 ? 2 : 3;
+        let lifeCoinPlatform = null;
         for (let i = 0; i < platformCount; i += 1) {
           const platformX = start + 65 + i * (118 + random() * 42);
           const level = 108 + random() * 125;
           const platformW = 104 + random() * 76;
-          addPlatform(platformX, level, platformW);
+          const platform = addPlatform(platformX, level, platformW);
+          if (!lifeCoinPlatform || platform.level < lifeCoinPlatform.level) lifeCoinPlatform = platform;
           const onPlatform = 2 + Math.floor(random() * 3);
           arcCoins(platformX + 23, world.groundY - level - 28, onPlatform, 28, 13);
           if (random() > .61 && platformW > 130) {
@@ -677,6 +689,13 @@
         }
         const groundCoinCount = 3 + Math.floor(random() * 4);
         arcCoins(start + 45, world.groundY - 38, groundCoinCount, 38, 26 + random() * 16);
+        if (index > 2 && lifeCoinPlatform && random() > .87) {
+          addCoin(
+            lifeCoinPlatform.x + lifeCoinPlatform.w * .5,
+            lifeCoinPlatform.y - 36,
+            "life"
+          );
+        }
       }
 
       if (!isOpening || index > 1) {
@@ -1025,27 +1044,57 @@
 
     function updateCoins() {
       const player = game.player;
-      let collected = 0;
-      let effectX = 0;
-      let effectY = 0;
+      let normalCollected = 0;
+      let lifeCollected = 0;
+      let normalEffectX = 0;
+      let normalEffectY = 0;
+      let lifeEffectX = 0;
+      let lifeEffectY = 0;
       for (const coin of world.coins) {
         if (coin.taken || !circleHitsRect(coin, player)) continue;
         coin.taken = true;
-        collected += 1;
-        effectX += coin.x;
-        effectY += coin.y;
+        if (coin.kind === "life") {
+          lifeCollected += 1;
+          lifeEffectX += coin.x;
+          lifeEffectY += coin.y;
+        } else {
+          normalCollected += 1;
+          normalEffectX += coin.x;
+          normalEffectY += coin.y;
+        }
       }
-      if (collected > 0) {
-        game.coins += collected;
+      const totalCollected = normalCollected + lifeCollected;
+      if (totalCollected > 0) {
+        game.coins += totalCollected;
+        const previousLives = game.lives;
+        if (lifeCollected > 0) {
+          game.lives = Math.min(3, game.lives + lifeCollected);
+        }
         updateHud();
-        playCoinSound();
-        makeParticles(
-          effectX / collected,
-          effectY / collected,
-          "#ffd542",
-          Math.min(14, 5 + collected * 2),
-          105
-        );
+        if (normalCollected > 0) {
+          makeParticles(
+            normalEffectX / normalCollected,
+            normalEffectY / normalCollected,
+            "#ffd542",
+            Math.min(6, 2 + normalCollected),
+            88
+          );
+        }
+        if (lifeCollected > 0) {
+          playCoinSound();
+          makeParticles(
+            lifeEffectX / lifeCollected,
+            lifeEffectY / lifeCollected,
+            "#1b7145",
+            13,
+            112
+          );
+          if (game.lives > previousLives) {
+            showMessage("+1 Leben!");
+          } else {
+            showMessage("Grüne Münze – Leben bereits voll.");
+          }
+        }
       }
     }
 
@@ -1125,7 +1174,7 @@
       ctx.fillRect(0, 0, view.width, view.height);
 
       const zoneName = zone % 2 === 0 ? "DORFPFAD" : "HANGWEG";
-      zoneLabel.textContent = zoneName + " · " + (zone + 1) + " · V8";
+      zoneLabel.textContent = zoneName + " · " + (zone + 1) + " · V9";
     }
 
     function drawGround() {
@@ -1168,23 +1217,44 @@
 
     function drawCoin(coin) {
       const x = coin.x - world.cameraX;
-      if (x < -28 || x > view.width + 28) return;
-      const wobble = .45 + Math.abs(Math.sin(world.time * 6.3 + coin.phase)) * .55;
+      if (x < -36 || x > view.width + 36) return;
+      const isLifeCoin = coin.kind === "life";
+      const wobbleMinimum = isLifeCoin ? .68 : .45;
+      const wobble = wobbleMinimum + Math.abs(Math.sin(world.time * 6.3 + coin.phase)) * (1 - wobbleMinimum);
       ctx.save();
       ctx.translate(Math.round(x), Math.round(coin.y));
       ctx.scale(wobble, 1);
-      ctx.fillStyle = "#8e4e05";
-      ctx.beginPath();
-      ctx.arc(0, 0, coin.r + 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#ffd842";
-      ctx.beginPath();
-      ctx.arc(0, -1, coin.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#fff1a0";
-      ctx.fillRect(-3, -8, 6, 15);
-      ctx.fillStyle = "#c47505";
-      ctx.fillRect(-1, -7, 3, 13);
+      if (isLifeCoin) {
+        ctx.fillStyle = "#062c1c";
+        ctx.beginPath();
+        ctx.arc(0, 0, coin.r + 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#0b5d36";
+        ctx.beginPath();
+        ctx.arc(0, -1, coin.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#6fbd87";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, -1, coin.r - 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "#e2f5e5";
+        ctx.fillRect(-3, -10, 6, 20);
+        ctx.fillRect(-10, -3, 20, 6);
+      } else {
+        ctx.fillStyle = "#8e4e05";
+        ctx.beginPath();
+        ctx.arc(0, 0, coin.r + 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffd842";
+        ctx.beginPath();
+        ctx.arc(0, -1, coin.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#fff1a0";
+        ctx.fillRect(-3, -8, 6, 15);
+        ctx.fillStyle = "#c47505";
+        ctx.fillRect(-1, -7, 3, 13);
+      }
       ctx.restore();
     }
 
