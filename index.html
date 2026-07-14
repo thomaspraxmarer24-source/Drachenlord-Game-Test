@@ -499,6 +499,7 @@
     let audioPrimed = false;
     let musicWanted = false;
     let lastAudioRetry = 0;
+    let lastCoinSoundAt = -Infinity;
 
     try {
       game.highCoins = Number(localStorage.getItem("drachenlord-simulator-coins")) || 0;
@@ -852,6 +853,9 @@
     }
 
     function playCoinSound() {
+      const now = performance.now();
+      if (now - lastCoinSoundAt < 70) return;
+      lastCoinSoundAt = now;
       sounds.coin.muted = false;
       sounds.coin.pause();
       try { sounds.coin.currentTime = 0; } catch (error) {}
@@ -916,6 +920,7 @@
     }
 
     function makeParticles(x, y, color, count, velocity) {
+      count = Math.min(count, Math.max(0, 140 - world.particles.length));
       for (let i = 0; i < count; i += 1) {
         const angle = random() * Math.PI * 2;
         const speed = velocity * (.35 + random() * .85);
@@ -1020,24 +1025,44 @@
 
     function updateCoins() {
       const player = game.player;
+      let collected = 0;
+      let effectX = 0;
+      let effectY = 0;
       for (const coin of world.coins) {
         if (coin.taken || !circleHitsRect(coin, player)) continue;
         coin.taken = true;
-        game.coins += 1;
+        collected += 1;
+        effectX += coin.x;
+        effectY += coin.y;
+      }
+      if (collected > 0) {
+        game.coins += collected;
         updateHud();
         playCoinSound();
-        makeParticles(coin.x, coin.y, "#ffd542", 10, 110);
+        makeParticles(
+          effectX / collected,
+          effectY / collected,
+          "#ffd542",
+          Math.min(14, 5 + collected * 2),
+          105
+        );
       }
     }
 
     function updateParticles(dt) {
-      for (const particle of world.particles) {
+      let writeIndex = 0;
+      for (let i = 0; i < world.particles.length; i += 1) {
+        const particle = world.particles[i];
         particle.x += particle.vx * dt;
         particle.y += particle.vy * dt;
         particle.vy += 410 * dt;
         particle.life -= dt;
+        if (particle.life > 0) {
+          world.particles[writeIndex] = particle;
+          writeIndex += 1;
+        }
       }
-      world.particles = world.particles.filter(function(particle) { return particle.life > 0; });
+      world.particles.length = writeIndex;
     }
 
     function cleanWorld() {
@@ -1100,7 +1125,7 @@
       ctx.fillRect(0, 0, view.width, view.height);
 
       const zoneName = zone % 2 === 0 ? "DORFPFAD" : "HANGWEG";
-      zoneLabel.textContent = zoneName + " · " + (zone + 1) + " · V7";
+      zoneLabel.textContent = zoneName + " · " + (zone + 1) + " · V8";
     }
 
     function drawGround() {
